@@ -1,0 +1,8 @@
+This repository utilizes the following open source repositories:
+
+1. NVlabs / stylegan2-ada-pytorch
+2. zllrunning / face-parsing.PyTorch
+3. d-li14 / face-attribute-prediction
+4. deepinsight / insightface
+
+Please find the license of 2-4 in external/.

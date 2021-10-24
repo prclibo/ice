@@ -6,7 +6,6 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
-import itertools
 import numpy as np
 import torch
 from torch_utils import misc
@@ -284,11 +283,11 @@ class SynthesisLayer(torch.nn.Module):
             self.noise_strength = torch.nn.Parameter(torch.zeros([]))
         self.bias = torch.nn.Parameter(torch.zeros([out_channels]))
 
-    def forward(self, x, styles, noise_mode='random', fused_modconv=True, gain=1):
+    def forward(self, x, w, noise_mode='random', fused_modconv=True, gain=1):
         assert noise_mode in ['random', 'const', 'none']
         in_resolution = self.resolution // self.up
         misc.assert_shape(x, [None, self.weight.shape[1], in_resolution, in_resolution])
-        # styles = self.affine(w)
+        styles = self.affine(w)
 
         noise = None
         if self.use_noise and noise_mode == 'random':
@@ -318,8 +317,8 @@ class ToRGBLayer(torch.nn.Module):
         self.bias = torch.nn.Parameter(torch.zeros([out_channels]))
         self.weight_gain = 1 / np.sqrt(in_channels * (kernel_size ** 2))
 
-    def forward(self, x, styles, fused_modconv=True):
-        styles = styles * self.weight_gain
+    def forward(self, x, w, fused_modconv=True):
+        styles = self.affine(w) * self.weight_gain
         x = modulated_conv2d(x=x, weight=self.weight, styles=styles, demodulate=False, fused_modconv=fused_modconv)
         x = bias_act.bias_act(x, self.bias.to(x.dtype), clamp=self.conv_clamp)
         return x
@@ -377,40 +376,41 @@ class SynthesisBlock(torch.nn.Module):
             self.skip = Conv2dLayer(in_channels, out_channels, kernel_size=1, bias=False, up=2,
                 resample_filter=resample_filter, channels_last=self.channels_last)
 
-    def forward(self, x, img, styles, force_fp32=False, fused_modconv=None, **layer_kwargs):
+    def forward(self, x, img, ws, force_fp32=False, fused_modconv=None, **layer_kwargs):
+        misc.assert_shape(ws, [None, self.num_conv + self.num_torgb, self.w_dim])
+        w_iter = iter(ws.unbind(dim=1))
         dtype = torch.float16 if self.use_fp16 and not force_fp32 else torch.float32
         memory_format = torch.channels_last if self.channels_last and not force_fp32 else torch.contiguous_format
         if fused_modconv is None:
             with misc.suppress_tracer_warnings(): # this value will be treated as a constant
                 fused_modconv = (not self.training) and (dtype == torch.float32 or int(x.shape[0]) == 1)
 
-        s_iter = iter(styles)
         # Input.
         if self.in_channels == 0:
             x = self.const.to(dtype=dtype, memory_format=memory_format)
-            x = x.unsqueeze(0).repeat([styles[0].shape[0], 1, 1, 1])
+            x = x.unsqueeze(0).repeat([ws.shape[0], 1, 1, 1])
         else:
             misc.assert_shape(x, [None, self.in_channels, self.resolution // 2, self.resolution // 2])
             x = x.to(dtype=dtype, memory_format=memory_format)
 
         # Main layers.
         if self.in_channels == 0:
-            x = self.conv1(x, next(s_iter), fused_modconv=fused_modconv, **layer_kwargs)
+            x = self.conv1(x, next(w_iter), fused_modconv=fused_modconv, **layer_kwargs)
         elif self.architecture == 'resnet':
             y = self.skip(x, gain=np.sqrt(0.5))
-            x = self.conv0(x, next(s_iter), fused_modconv=fused_modconv, **layer_kwargs)
-            x = self.conv1(x, next(s_iter), fused_modconv=fused_modconv, gain=np.sqrt(0.5), **layer_kwargs)
+            x = self.conv0(x, next(w_iter), fused_modconv=fused_modconv, **layer_kwargs)
+            x = self.conv1(x, next(w_iter), fused_modconv=fused_modconv, gain=np.sqrt(0.5), **layer_kwargs)
             x = y.add_(x)
         else:
-            x = self.conv0(x, next(s_iter), fused_modconv=fused_modconv, **layer_kwargs)
-            x = self.conv1(x, next(s_iter), fused_modconv=fused_modconv, **layer_kwargs)
+            x = self.conv0(x, next(w_iter), fused_modconv=fused_modconv, **layer_kwargs)
+            x = self.conv1(x, next(w_iter), fused_modconv=fused_modconv, **layer_kwargs)
 
         # ToRGB.
         if img is not None:
             misc.assert_shape(img, [None, self.img_channels, self.resolution // 2, self.resolution // 2])
             img = upfirdn2d.upsample2d(img, self.resample_filter)
         if self.is_last or self.architecture == 'skip':
-            y = self.torgb(x, next(s_iter), fused_modconv=fused_modconv)
+            y = self.torgb(x, next(w_iter), fused_modconv=fused_modconv)
             y = y.to(dtype=torch.float32, memory_format=torch.contiguous_format)
             img = img.add_(y) if img is not None else y
 
@@ -454,12 +454,21 @@ class SynthesisNetwork(torch.nn.Module):
                 self.num_ws += block.num_torgb
             setattr(self, f'b{res}', block)
 
-    # def forward(self, ws, **block_kwargs):
-    def forward(self, styles, **block_kwargs):
+    def forward(self, ws, **block_kwargs):
+        block_ws = []
+        with torch.autograd.profiler.record_function('split_ws'):
+            misc.assert_shape(ws, [None, self.num_ws, self.w_dim])
+            ws = ws.to(torch.float32)
+            w_idx = 0
+            for res in self.block_resolutions:
+                block = getattr(self, f'b{res}')
+                block_ws.append(ws.narrow(1, w_idx, block.num_conv + block.num_torgb))
+                w_idx += block.num_conv
+
         x = img = None
-        for res, cur_styles in zip(self.block_resolutions, styles):
+        for res, cur_ws in zip(self.block_resolutions, block_ws):
             block = getattr(self, f'b{res}')
-            x, img = block(x, img, cur_styles, **block_kwargs)
+            x, img = block(x, img, cur_ws, **block_kwargs)
         return img
 
 #----------------------------------------------------------------------------
@@ -485,70 +494,9 @@ class Generator(torch.nn.Module):
         self.num_ws = self.synthesis.num_ws
         self.mapping = MappingNetwork(z_dim=z_dim, c_dim=c_dim, w_dim=w_dim, num_ws=self.num_ws, **mapping_kwargs)
 
-    def compute_styles(self, ws):
-        syn = self.synthesis
-        misc.assert_shape(ws, [None, syn.num_ws, syn.w_dim])
-        ws = ws.to(torch.float32)
-        w_idx = 0
-        block_ws = []
-        for res in syn.block_resolutions:
-            block = getattr(syn, f'b{res}')
-            block_ws.append(ws.narrow(1, w_idx, block.num_conv + block.num_torgb))
-            w_idx += block.num_conv
-
-        x = img = None
-        styles = []
-        for res, cur_ws in zip(syn.block_resolutions, block_ws):
-            block = getattr(syn, f'b{res}')
-            cur_style = []
-            w_iter = iter(cur_ws.unbind(dim=1))
-            if block.in_channels == 0:
-                cur_style.append(block.conv1.affine(next(w_iter)))
-            else:
-                cur_style.append(block.conv0.affine(next(w_iter)))
-                cur_style.append(block.conv1.affine(next(w_iter)))
-
-            if block.is_last or block.architecture == 'skip':
-                cur_style.append(block.torgb.affine(next(w_iter)))
-            styles.append(cur_style)
-
-        return styles
-
-    def pack_styles(self, styles):
-        return torch.cat(tuple(itertools.chain(*styles)), dim=1)
-
-    def unpack_styles(self, svec):
-        syn = self.synthesis
-        offset = 0
-        out = []
-        styles = []
-        for res in syn.block_resolutions:
-            block = getattr(syn, f'b{res}')
-            cur_style = []
-            if block.in_channels == 0:
-                length = block.conv1.affine.weight.shape[0]
-                cur_style.append(svec[:, offset: offset + length])
-                offset += length
-            else:
-                length = block.conv0.affine.weight.shape[0]
-                cur_style.append(svec[:, offset: offset + length])
-                offset += length
-                length = block.conv1.affine.weight.shape[0]
-                cur_style.append(svec[:, offset: offset + length])
-                offset += length
-
-            if block.is_last or block.architecture == 'skip':
-                length = block.torgb.affine.weight.shape[0]
-                cur_style.append(svec[:, offset: offset + length])
-                offset += length
-            styles.append(cur_style)
-        assert offset == svec.shape[1]
-        return styles
-
     def forward(self, z, c, truncation_psi=1, truncation_cutoff=None, **synthesis_kwargs):
-        self.ws = self.mapping(z, c, truncation_psi=truncation_psi, truncation_cutoff=truncation_cutoff)
-        self.styles = self.compute_styles(self.ws)
-        img = self.synthesis(self.styles, **synthesis_kwargs)
+        ws = self.mapping(z, c, truncation_psi=truncation_psi, truncation_cutoff=truncation_cutoff)
+        img = self.synthesis(ws, **synthesis_kwargs)
         return img
 
 #----------------------------------------------------------------------------

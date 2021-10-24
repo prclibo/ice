@@ -1,2 +1,12 @@
 __pycache__/
+.ipynb_checkpoints/
 .cache/
+cache/
+*.sw[a-z]
+core.*
+*.tar*
+pixel2style2pixel
+training-runs
+*.pt*
+*.pth*
+*.ipynb
