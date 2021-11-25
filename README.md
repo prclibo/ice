@@ -1,5 +1,7 @@
 # Interpretable Control Exploration and Counterfactual Explanation (ICE)
 
+![image info](./ice/teaser.png)
+
 **Which Style Makes Me Attractive? Interpretable Control Discovery and Counterfactual Explanation on StyleGAN**
 
 Bo Li, Qiulin Wang, Jiquan Pei, Yu Yang, Xiangyang Ji
@@ -13,6 +15,10 @@ Experiments on various disentanglement criterions demonstrate the effectiveness 
 
 The code is developed on [`NVlabs/stylegan2-ada-pytorch`](https://github.com/NVlabs/stylegan2-ada-pytorch) and put in the `ice` folder. Please play with the two ipython notebooks.
 
-* `ice/discover_subspaces`: Solve subspaces by using face analysis models as criterions. Currently we only include several representative subspaces. The notebook requires to download some pre-trained models. You might have to spend some efforts to put everything at the right place. See the notebook comments for details.
+* `ice/discover_subspaces` [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/prclibo/ice/blob/ice/ice/discover_subspaces.ipynb)
 
-* `ice/explain_counterfactually`: Use the interpretable subspaces discovered by the above notebook to explain the classifier of attractiveness. Since we did not find good public pre-trained model. The attractiveness classifier is trained by ourselves using `d-li14/face-attribute-prediction`.
+    Solve subspaces by using face analysis models as criterions. Currently we only include several representative subspaces. The notebook requires to download some pre-trained models. You might have to spend some efforts to put everything at the right place. See the notebook comments for details.
+
+* `ice/explain_counterfactually` [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/prclibo/ice/blob/ice/ice/explain_counterfactually.ipynb)
+    
+    Use the interpretable subspaces discovered by the above notebook to explain the classifier of attractiveness. Since we did not find good public pre-trained model. The attractiveness classifier is trained by ourselves using `d-li14/face-attribute-prediction`.
