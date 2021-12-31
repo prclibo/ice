@@ -1,4 +1,4 @@
-# Interpretable Control Exploration and Counterfactual Explanation (ICE)
+# Interpretable Control Exploration and Counterfactual Explanation (ICE) on StyleGAN
 
 ![image info](./ice/teaser.png)
 
