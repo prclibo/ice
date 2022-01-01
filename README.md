@@ -1,6 +1,6 @@
 # Interpretable Control Exploration and Counterfactual Explanation (ICE) on StyleGAN
 
-![image info](./ice/teaser.png)
+![teaser](./ice/teaser.png)
 
 **Which Style Makes Me Attractive? Interpretable Control Discovery and Counterfactual Explanation on StyleGAN**
 
@@ -17,8 +17,12 @@ The code is developed on [`NVlabs/stylegan2-ada-pytorch`](https://github.com/NVl
 
 * `ice/discover_subspaces` [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/prclibo/ice/blob/ice/ice/discover_subspaces.ipynb)
 
-    Solve subspaces by using face analysis models as criterions. Currently we only include several representative subspaces. The notebook requires to download some pre-trained models. You might have to spend some efforts to put everything at the right place. See the notebook comments for details.
+    Solve subspaces by using face analysis models as criterions. Currently we only include several representative subspaces. The notebook requires to download some pre-trained models. You might have to spend some efforts to put everything at the right place. See the notebook comments for details. This notebook shows the code sketch to generate Figure 3 (as below) in the paper, i.e., the latent subspace for interpretable face manipulation.
+
+![subspaces](./ice/subspaces.png)
 
 * `ice/explain_counterfactually` [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/prclibo/ice/blob/ice/ice/explain_counterfactually.ipynb)
     
-    Use the interpretable subspaces discovered by the above notebook to explain the classifier of attractiveness. Since we did not find good public pre-trained model. The attractiveness classifier is trained by ourselves using `d-li14/face-attribute-prediction`.
+    Use the interpretable subspaces discovered by the above notebook to explain the classifier of attractiveness. This notebook shows the code sketch to generate Figure 4 (as below) in the paper, i.e., the interpretable counterfactuals to increase attractiveness score of a given classifier. Since we did not find good public pre-trained model. The attractiveness classifier is trained by ourselves using `d-li14/face-attribute-prediction`.
+
+![coutnerfactuals](./ice/counterfactuals.png)
